@@ -35,6 +35,8 @@ def msg_bits(msg: Any) -> int:
     """Rough size of a message in bits, for message-complexity reporting."""
     if msg is None:
         return 0
+    if type(msg).__name__ == "ndarray":  # Gradecast vectors: 2 bits per non-empty entry
+        return 2 * int((msg >= 0).sum()) + 8
     if isinstance(msg, (bool, int)) or isinstance(msg, str) and len(msg) == 1:
         return 2  # {0, 1, undecided} fits in 2 bits
     if isinstance(msg, (tuple, list, set, frozenset)):

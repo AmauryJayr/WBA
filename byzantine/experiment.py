@@ -7,7 +7,7 @@ import random
 import time
 import zlib
 from dataclasses import asdict, dataclass
-from typing import Iterable, List
+from typing import Iterable, List, Optional, Tuple
 
 from .adversaries import ADVERSARIES
 from .network import Simulation
@@ -27,6 +27,11 @@ class TrialConfig:
     inputs: str = "random"
     placement: str = "first"
     seed: int = 0
+    weights: Optional[Tuple[int, ...]] = None   # None = unweighted
+    rho: Optional[str] = None                   # tolerated faulty weight, e.g. "1/4"; None = f/n
+    faulty: Optional[Tuple[int, ...]] = None    # explicit faulty set (overrides placement)
+    crash: Optional[Tuple[int, ...]] = None     # faulty processes that only crash (hybrid adversary)
+    rho_crash: Optional[str] = None             # HybridKing: bound on crash weight
 
 
 def make_inputs(mode: str, n: int, rng: random.Random):
@@ -56,16 +61,23 @@ def choose_faulty(placement: str, n: int, k: int, rng: random.Random) -> List[in
 
 def run_trial(cfg: TrialConfig) -> dict:
     rng = random.Random(cfg.seed)
-    proto = PROTOCOLS[cfg.protocol](cfg.n, cfg.f)
+    kw = {} if cfg.rho_crash is None else {"rho_crash": cfg.rho_crash}
+    proto = PROTOCOLS[cfg.protocol](cfg.n, cfg.f, weights=cfg.weights, rho=cfg.rho, **kw)
+    if hasattr(proto, "coin_seed"):
+        proto.coin_seed = cfg.seed  # a fresh coin sequence per run
     adv = ADVERSARIES[cfg.adversary]()
+    if cfg.crash is not None:
+        adv.crash_set = frozenset(cfg.crash)
     inputs = make_inputs(cfg.inputs, cfg.n, rng)
-    faulty = choose_faulty(cfg.placement, cfg.n, cfg.actual_faults, rng)
+    faulty = (list(cfg.faulty) if cfg.faulty is not None
+              else choose_faulty(cfg.placement, cfg.n, cfg.actual_faults, rng))
     t0 = time.perf_counter()
     res = Simulation(proto, adv, inputs, faulty, seed=cfg.seed).run()
     elapsed = time.perf_counter() - t0
     row = asdict(cfg)
     row.update(
         within_bound=cfg.actual_faults <= cfg.f <= PROTOCOLS[cfg.protocol].max_faults(cfg.n),
+        anchor=proto.anchor,
         terminated=res.terminated,
         agreement=res.agreement,
         validity=res.validity,

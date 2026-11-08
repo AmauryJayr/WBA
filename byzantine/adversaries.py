@@ -51,7 +51,9 @@ class Adversary:
         vals = {}
         for p, ob in honest_out.items():
             if ob:
-                vals[p] = next(iter(ob.values()))
+                m = next(iter(ob.values()))
+                # vector messages (Gradecast echo/support) are not a single vote
+                vals[p] = m if isinstance(m, (int, str)) else None
         return vals
 
     def is_coordinator_step(self, step: int) -> bool:
@@ -171,5 +173,233 @@ def _lean(v) -> float:
     return {0: 0.0, 1: 1.0}.get(v, 0.5)
 
 
+class Stagger(SplitVote):
+    """Delay attack on Gradecast consensus; falls back to `split` elsewhere.
+
+    Gradecast lets each faulty process cause disagreement at most once, so the
+    best an adversary can do is spend one faulty process z per iteration. To do
+    that, z's gradecast must give one honest camp X grade 1 and the other camp
+    Y grade 0. Then X counts z's value toward maj and Y does not. All other live
+    faulty processes gradecast consistently, with values chosen so the weighted
+    tally sits exactly where z's weight tips it. That makes X and Y end the
+    iteration with different values.
+
+    Mechanics for z's gradecast (rushing, so the honest values are known):
+      send     z sends its value only to a set S1 of honest weight just below 1 - rho
+      echo     all live faulty echo z's value to camp A only (weight <= rho), so A
+               crosses 1 - rho and supports it, and no other honest process does
+      support  all live faulty support z's value to camp X only, so X sees weight
+               > rho (grade 1), and Y sees only A's support <= rho (grade 0)
+    X is chosen to split the honest weight in half, so the next iteration
+    starts balanced again. When no split is possible, faulty processes act
+    consistently and the honest processes finish.
+
+    S1 and A are chosen by a subset-sum heuristic (heaviest first, skipping
+    overshoots). In every run we checked it reaches the bound of F + 3
+    iterations, or the cap, where F is the number of positive-weight faulty
+    processes. It is a strong heuristic attack, not a proven optimum.
+    It does not attack the coin in GradecastCoin.
+    """
+    name = "stagger"
+
+    def setup(self, protocol, faulty, honest, inputs, rng):
+        super().setup(protocol, faulty, honest, inputs, rng)
+        self.gc = getattr(protocol, "name", "") in ("gradecast", "gc_king", "gc_coin")
+        if self.gc:
+            p = protocol
+            self.w = p.w
+            gone = getattr(p, "expelled_all", set())  # in every honest BAD already
+            self.live = [z for z in faulty if p.w[z] > 0 and z not in gone]
+            self.hpos = [h for h in honest if p.w[h] > 0]
+            self.plan = None
+
+    def act(self, step, honest_out):
+        if not self.gc:
+            return super().act(step, honest_out)
+        info = self.protocol.step_info(step)
+        if info.phase == "king":
+            return self._king(info.coordinator)
+        if info.phase not in ("send", "echo", "support"):
+            return {}  # e.g. the common-coin step: nothing useful to say
+        phase = ("send", "echo", "support").index(info.phase)
+        if phase == 0:
+            self.plan = self._plan(honest_out)
+        return self._send(phase)
+
+    def _king(self, king):
+        """A faulty king tells the two camps opposite values (GradecastKing)."""
+        if king not in self.faulty:
+            return {}
+        X = self.plan.get("X") if self.plan else None
+        if X is None:
+            X = set(self.honest[: len(self.honest) // 2])
+        zval = self.plan.get("zval", 0) if self.plan else 0
+        return {king: {d: (zval if d in X else 1 - zval) for d in range(self.n)}}
+
+    # -- planning ------------------------------------------------------------
+    def _plan(self, honest_out):
+        p, w = self.protocol, self.w
+        vals = {h: ob.get(h) for h, ob in honest_out.items() if ob}
+        hv = [0, 0]
+        for h in self.hpos:
+            if vals.get(h) in (0, 1):
+                hv[vals[h]] += w[h]
+        plan = dict(z=None, others={o: 0 for o in self.live})
+        if not self.live:
+            return plan
+        z = max(self.live, key=lambda o: (w[o], -o))
+        others = [o for o in self.live if o != z]
+        fw = sum(w[o] for o in self.live)
+
+        def fill(ok):
+            """Largest honest weight keeping ok(total): heaviest first, skipping
+            any process that would overshoot (a subset-sum heuristic)."""
+            S, tot = [], 0
+            for h in sorted(self.hpos, key=lambda h: (-w[h], h)):
+                if ok(tot + w[h]):
+                    S.append(h)
+                    tot += w[h]
+            return S, tot
+
+        # camp A: honest weight a with a <= rho*W and a + fw > rho*W
+        A, a = fill(lambda t: not p.weak(t))
+        if not p.weak(a + fw):
+            return plan
+        # S1: honest weight in [ (1-rho)W - fw, (1-rho)W )
+        S1, s = fill(lambda t: not p.strong(t))
+        if not p.strong(s + fw):
+            return plan
+
+        # choose z's value and the others' consistent values so the tally
+        # D = weight(1) - weight(0) lands where z's weight decides maj
+        for zval in (1, 0):
+            lo, hi = ((-w[z], 0) if zval == 1 else (0, w[z]))  # need lo < D <= hi
+            target = (lo + hi) / 2
+            D = hv[1] - hv[0]
+            chosen = {}
+            for o in sorted(others, key=lambda o: -w[o]):
+                up, down = D + w[o], D - w[o]
+                if abs(up - target) <= abs(down - target):
+                    chosen[o], D = 1, up
+                else:
+                    chosen[o], D = 0, down
+            if lo < D <= hi:
+                break
+        else:
+            return plan
+
+        # camp X: about half the honest weight (zero-weight honest split evenly)
+        X, xs, ys = set(), [0, 0], [0, 0]  # [weight, count] per camp
+        for h in sorted(self.honest, key=lambda h: (-w[h], h)):
+            if xs <= ys:
+                X.add(h)
+                xs = [xs[0] + w[h], xs[1] + 1]
+            else:
+                ys = [ys[0] + w[h], ys[1] + 1]
+        plan.update(z=z, zval=zval, others=chosen, S1=set(S1), A=set(A), X=X)
+        return plan
+
+    # -- messages --------------------------------------------------------------
+    def _send(self, phase):
+        plan, n = self.plan, self.n
+        out = {}
+        z = plan["z"]
+        if phase == 0:
+            for o, x in plan["others"].items():
+                out[o] = {d: x for d in range(n)}
+            if z is not None:
+                out[z] = {d: plan["zval"] for d in plan["S1"]}
+        elif z is not None:
+            vec = tuple(plan["zval"] if q == z else None for q in range(n))
+            targets = plan["A"] if phase == 1 else plan["X"]
+            for o in self.live:
+                out[o] = {d: vec for d in targets}
+            if phase == 2:
+                self.live.remove(z)  # every honest process now has z in BAD
+        return out
+
+
 ADVERSARIES = {cls.name: cls for cls in
-               (Silent, Crash, RandomFuzz, Flip, Equivocate, SplitVote)}
+               (Silent, Crash, RandomFuzz, Flip, Equivocate, SplitVote, Stagger)}
+
+
+class SigAttack(SplitVote):
+    """Attack on Dolev-Strong using valid faulty signatures; `split` elsewhere.
+
+    - the first faulty signer equivocates in round 1: 0 to half the honest
+      processes, 1 to the rest
+    - the second reveals a value as late as it can: in round r = number of
+      faulty signers, with a chain signed by r faulty processes, to a single
+      honest process. That process must relay it in round r+1 <= R or the
+      honest processes end up with different accepted sets.
+    """
+    name = "sig"
+
+    def setup(self, protocol, faulty, honest, inputs, rng):
+        super().setup(protocol, faulty, honest, inputs, rng)
+        self.ds = getattr(protocol, "name", "") == "dolev_strong"
+        if self.ds:
+            self.signers = [z for z in faulty if z in protocol._pos]
+            self.sign = protocol.signer_for(self.signers)
+
+    def act(self, step, honest_out):
+        if not self.ds:
+            return super().act(step, honest_out)
+        r, out, n = step + 1, {}, self.n
+        hs, w = self.honest, self.protocol.w
+        if self.signers and r == 1:
+            z = self.signers[0]
+            out[z] = {d: ((z, i % 2, self.sign(z, z, i % 2, ())),) for i, d in enumerate(hs)}
+            # the other faulty senders vote consistently, steering the tally
+            # D = weight(1) - weight(0) into (-w[z2], 0]: everyone decides 0,
+            # except the single process that receives z2's late 1.
+            if len(self.signers) >= 2:
+                z2 = self.signers[1]
+                D = sum((1 if self.inputs[h] == 1 else -1) * w[h] for h in hs if w[h] > 0)
+                target = -w[z2] / 2
+                for y in sorted(self.signers[2:], key=lambda y: -w[y]):
+                    x = 1 if abs(D + w[y] - target) <= abs(D - w[y] - target) else 0
+                    D += w[y] if x else -w[y]
+                    out[y] = {d: ((y, x, self.sign(y, y, x, ())),) for d in range(n)}
+        if len(self.signers) >= 2 and r == len(self.signers):
+            z = self.signers[1]
+            chain = ()
+            for signer in [z] + [y for y in self.signers if y != z][: r - 1]:
+                chain = self.sign(signer, z, 1, chain)
+            last = chain[-1][0]
+            out.setdefault(last, {})[hs[0]] = ((z, 1, chain),)
+        return out
+
+
+class Hybrid(Adversary):
+    """Hybrid faults: processes in `crash_set` only crash (Crash); the other
+    faulty processes are Byzantine (SplitVote). run_trial sets crash_set."""
+    name = "hybrid"
+    crash_set: frozenset = frozenset()
+
+    def setup(self, protocol, faulty, honest, inputs, rng):
+        super().setup(protocol, faulty, honest, inputs, rng)
+        cs = [p for p in faulty if p in self.crash_set]
+        bz = [p for p in faulty if p not in self.crash_set]
+        self.parts = []
+        if cs:
+            a = Crash()
+            a.setup(protocol, cs, honest, inputs, rng)
+            self.parts.append(a)
+        if bz:
+            a = SplitVote()
+            a.setup(protocol, bz, honest, inputs, rng)
+            self.parts.append(a)
+
+    def act(self, step, honest_out):
+        out = {}
+        for a in self.parts:
+            out.update(a.act(step, honest_out))
+        return out
+
+    def observe(self, step, inboxes):
+        for a in self.parts:
+            a.observe(step, inboxes)
+
+
+ADVERSARIES.update({cls.name: cls for cls in (SigAttack, Hybrid)})
