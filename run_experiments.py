@@ -595,6 +595,103 @@ def cmd_compare(args):
     print("\ncumulative steps after", args.ell, "instances:\n" + fin.round(0).to_string())
 
 
+def cmd_fig5(args):
+    """Garg & Bridgman Fig. 5 (rounds King needs) + weighted Gradecast.
+
+    One "round" = one loop iteration (3 message exchanges for King and for
+    Gradecast alike), as in the paper. Uniform weights = the unweighted
+    algorithm (King: f+1 phases; Gradecast: Ben-Or-Dolev-Hoch ByzConsensus).
+      King                       alpha_rho, always (no early stopping)
+      Gradecast, worst case      cap_rho
+      Gradecast, expected        E[min(F+3, cap_rho)] over the failure model
+                                 (fa, fb), safe runs only (failed weight < 1/3)
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from byzantine.fig4_compare import analytic
+    from byzantine.weight_assignment import LABELS, SCHEMES
+
+    os.makedirs(os.path.join(RESULTS, "figures"), exist_ok=True)
+    nbs = [nb for nb in range(args.nb_max + 1) if (args.na + nb) % 3 == 0]
+    an = pd.DataFrame([analytic(s, args.na, nb, args.fa, args.fb) for s in SCHEMES for nb in nbs])
+    an["king_rounds"] = an.anchor
+    an["gc_worst_rounds"] = an.gc_cap
+    an["gc_expected_rounds"] = an.gc_bound_steps / 3
+    an.to_csv(os.path.join(RESULTS, "fig5.csv"), index=False)
+    sim_csv = os.path.join(RESULTS, "fig4_compare_sim.csv")
+    sim = pd.read_csv(sim_csv) if os.path.exists(sim_csv) else None
+
+    plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False,
+                         "axes.grid": True, "grid.color": "#e4e3df", "grid.linewidth": 0.6,
+                         "axes.edgecolor": "#8a8984", "font.size": 10, "legend.frameon": False})
+    style = {  # same encodings as the paper / our Fig. 4
+        "only_a": dict(color="#2a78d6", ls="--", lw=2, marker=None),
+        "uniform": dict(color="#eb6834", ls="none", marker="x", ms=4, mew=1.1),
+        "inverse_failure": dict(color="#1baf7a", ls="none", marker="o", ms=4, mfc="none", mew=1.1),
+        "not_failing": dict(color="#eda100", ls="none", marker="*", ms=5),
+    }
+    label = dict(LABELS, uniform="Uniform (= unweighted algorithm)")
+    ymax = 145
+
+    # Figure 1: three panels, same axes as the paper's Fig. 5
+    panels = [("king_rounds", "(a) Weighted King: rounds required (paper's Fig. 5)"),
+              ("gc_worst_rounds", "(b) Weighted Gradecast: rounds required, worst case"),
+              ("gc_expected_rounds", f"(c) Weighted Gradecast: expected rounds\n"
+                                     f"(early stopping, fa = {args.fa}, fb = {args.fb})")]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True)
+    for ax, (col, title) in zip(axes, panels):
+        for s in SCHEMES:
+            g = an[an.scheme == s]
+            ax.plot(g.nb, g[col], label=label[s], **style[s])
+        ax.set_title(title, loc="left", fontsize=10)
+        ax.set_xlim(0, args.nb_max)
+        ax.set_ylim(0, ymax)
+        ax.set_xlabel("Number of processes in set B")
+    axes[0].set_ylabel("Number of rounds")
+    axes[0].legend(loc="upper left", fontsize=8.5)
+    fig.suptitle(f"Rounds to decide vs |B|  (|A| = {args.na}; one round = one loop iteration = "
+                 f"3 message exchanges, for both algorithms)", x=0.07, ha="left", fontsize=10)
+    fig.tight_layout()
+    out1 = os.path.join(RESULTS, "figures", "fig5_king_and_gradecast.png")
+    fig.savefig(out1, dpi=200, bbox_inches="tight")
+
+    # Figure 2: one panel per weighting, King vs Gradecast head to head
+    KING, GCW, GCE = "#2a78d6", "#eb6834", "#1baf7a"
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
+    for ax, s in zip(axes.flat, SCHEMES):
+        g = an[an.scheme == s]
+        ax.plot(g.nb, g.king_rounds, color=KING, lw=2, label="Weighted King (always α_ρ)")
+        ax.plot(g.nb, g.gc_worst_rounds, color=GCW, lw=1.8, ls="--",
+                label="Weighted Gradecast, worst case (cap_ρ)")
+        ax.plot(g.nb, g.gc_expected_rounds, color=GCE, lw=1.8,
+                label="Weighted Gradecast, expected (early stopping)")
+        if sim is not None:
+            m = sim[(sim.scheme == s) & (sim.adversary == "stagger")].groupby("nb").steps.mean() / 3
+            ax.plot(m.index, m.values, ls="none", marker="o", ms=5, mfc="white", mec=GCE, mew=1.3,
+                    label="Gradecast simulated vs stagger attack (mean)")
+        ax.set_title(label[s], loc="left", fontsize=10)
+        ax.set_xlim(0, args.nb_max)
+        ax.set_ylim(0, 12 if s == "only_a" else ymax)
+    for ax in axes[1]:
+        ax.set_xlabel("Number of processes in set B")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Number of rounds")
+    axes[0, 1].legend(loc="upper left", fontsize=8.5)
+    fig.suptitle(f"Weighted King vs weighted Gradecast, rounds to decide (|A| = {args.na}, "
+                 f"fa = {args.fa}, fb = {args.fb}; expected values over safe runs)",
+                 x=0.07, ha="left", fontsize=10)
+    fig.tight_layout()
+    out2 = os.path.join(RESULTS, "figures", "fig5_king_vs_gradecast_by_weighting.png")
+    fig.savefig(out2, dpi=200, bbox_inches="tight")
+    print(out1, out2, sep="\n")
+    print(an[an.nb.isin([0, 30, 90, 198, 399])]
+            .pivot(index="nb", columns="scheme",
+                   values=["king_rounds", "gc_worst_rounds", "gc_expected_rounds"])
+            .round(1).to_string())
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -629,6 +726,12 @@ def main():
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     p.add_argument("--plot-only", action="store_true", help="reuse results/fig4_compare_sim.csv")
     p.set_defaults(fn=cmd_fig4compare)
+    p = sub.add_parser("fig5")
+    p.add_argument("--na", type=int, default=6)
+    p.add_argument("--fa", default="0.1")
+    p.add_argument("--fb", default="0.3")
+    p.add_argument("--nb-max", type=int, default=400)
+    p.set_defaults(fn=cmd_fig5)
     p = sub.add_parser("improve")
     p.add_argument("--na", type=int, default=6)
     p.add_argument("--fa", default="0.1")
