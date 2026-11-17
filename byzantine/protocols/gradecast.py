@@ -76,6 +76,16 @@ def _row(msg, n: int) -> np.ndarray:
     return np.full(n, NONE, dtype=np.int8)
 
 
+def _well_formed_vector(msg, n: int) -> bool:
+    """Exactly the echo/support messages _row accepts as meaningful: a length-n
+    vector of 0/1/NONE, or the scalar shorthand 0/1. Anything else is malformed."""
+    if isinstance(msg, np.ndarray):
+        return msg.shape == (n,) and bool(np.isin(msg, (NONE, 0, 1)).all())
+    if isinstance(msg, tuple):
+        return len(msg) == n and all(type(x) is int and x in (0, 1) or x is None for x in msg)
+    return type(msg) is int and msg in (0, 1)
+
+
 class Gradecast(Protocol):
     name = "gradecast"
     VALUES = (0, 1)
@@ -109,6 +119,10 @@ class Gradecast(Protocol):
         # at return.
         self.initial_bad: dict = {}
         self.final_bad: dict = {}
+        # Garg & Bridgman Lemma 8 part 1: a positive-weight process that sends
+        # nothing, or something malformed, is faulty. Recorded separately from
+        # BAD so the protocol itself is unchanged; used by the weight update.
+        self.detected: dict = {}
         self.coin_seed = 0
 
     def strong(self, s) -> bool:
@@ -167,6 +181,23 @@ class Gradecast(Protocol):
         w = self._wS[keep]
         return w @ (M == 0), w @ (M == 1)
 
+    def _flag_missing(self, pid, bad, inbox, kind):
+        """Part-1 detection for one step: every positive-weight process not in
+        BAD must have sent a well-formed message. Only called before pid's own
+        extra iteration, when every honest process is still running (Claim 7.5)."""
+        n = self.n
+        det = self.detected.setdefault(pid, set())
+        for j in self.senders:
+            if j in bad:
+                continue
+            m = inbox.get(j)
+            if kind == "send":
+                ok = _entry(m, j, n) is not None
+            else:
+                ok = _well_formed_vector(m, n)
+            if not ok:
+                det.add(j)
+
     def _finish(self, pid, v, bad):
         self.final_bad[pid] = set(bad)
         return v
@@ -183,6 +214,8 @@ class Gradecast(Protocol):
             it += 1
             # send (messages from BAD processes are ignored, paper line 1)
             inbox = yield (broadcast(n, v) if speaks else {})
+            if not exiting:
+                self._flag_missing(pid, bad, inbox, "send")
             recv = np.full(n, NONE, dtype=np.int8)
             for q in range(n):
                 if q not in bad:
@@ -191,6 +224,8 @@ class Gradecast(Protocol):
                         recv[q] = e
             # echo
             inbox = yield (broadcast(n, recv) if speaks else {})
+            if not exiting:
+                self._flag_missing(pid, bad, inbox, "echo")
             c0, c1 = self._tallies(inbox, bad)
             support = np.where(self._strong_v(c0), 0,
                                np.where(self._strong_v(c1), 1, NONE)).astype(np.int8)
@@ -199,6 +234,7 @@ class Gradecast(Protocol):
             inbox = yield (broadcast(n, support) if speaks else {})
             if exiting:
                 return self._finish(pid, v, bad)
+            self._flag_missing(pid, bad, inbox, "support")
 
             # grade every leader, then update (Fig. 2, lines 4-9). A leader in
             # BAD is still graded from the others' echoes and supports; only

@@ -29,7 +29,7 @@ byzantine/
   experiment.py     one trial = (protocol, n, f, adversary, inputs, fault placement, seed)
   modelcheck.py     exhaustive search over ALL adversary behaviours for small n
 tests/              python -m unittest discover -s tests -v
-run_experiments.py  sweep | boundary | modelcheck | plot | fig4 | fig4compare | improve | compare
+run_experiments.py  sweep | boundary | modelcheck | plot | fig4 | fig4compare | fig5 | improve | compare | idealratio | weightupdate
                     ->  results/*.csv, results/figures/
 ```
 

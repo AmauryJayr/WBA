@@ -181,6 +181,40 @@ class ModelExtensions(unittest.TestCase):
                     self.assertTrue(all(r["correct"] for r in rows), rows)
 
 
+class WeightUpdate(unittest.TestCase):
+    """Detection used by the weight update never accuses an honest process."""
+
+    def test_detection_is_sound(self):
+        from byzantine.experiment import make_inputs
+        from byzantine.network import Simulation
+        rng = random.Random(11)
+        for proto in ("queen", "king", "gradecast"):
+            for trial in range(30):
+                n, w, faulty, rho = random_weighted_system(rng, proto)
+                for adv in ADVERSARIES:
+                    P = PROTOCOLS[proto](n, 0, weights=w, rho=rho)
+                    res = Simulation(P, ADVERSARIES[adv](), make_inputs("random", n, rng),
+                                     list(faulty), seed=trial).run()
+                    found = {p: set(P.detected.get(p, ())) | set(getattr(P, "final_bad", {}).get(p, ()))
+                             for p in range(n)}
+                    with self.subTest(protocol=proto, w=w, faulty=faulty, adversary=adv):
+                        self.assertTrue(res.correct)
+                        for p, s in found.items():
+                            if p not in faulty:
+                                self.assertLessEqual(set(s), set(faulty))
+
+    def test_update_keeps_honest_and_stays_correct(self):
+        from byzantine.improvements import int_weights
+        from byzantine.weight_update import trial
+        w = int_weights(6, 12, (3, 1))
+        for method in ("garg_queen", "garg_king", "gc_bad"):
+            for adv in ("silent", "random", "attack"):
+                for seed in range(3):
+                    rows = trial((method, adv, 6, 12, 0.02, 0.05, w, 25, seed))  # asserts inside
+                    with self.subTest(method=method, adversary=adv, seed=seed):
+                        self.assertTrue(all(r.get("correct", True) for r in rows if r["alive"]))
+
+
 class ModelCheck(unittest.TestCase):
     """Exhaustive search over all adversary behaviours for small systems."""
 

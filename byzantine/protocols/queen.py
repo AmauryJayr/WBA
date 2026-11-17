@@ -25,6 +25,10 @@ class Queen(Protocol):
     name = "queen"
     VALUES = (0, 1)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.detected: dict = {}  # honest pid -> queens it proved faulty (Lemma 8)
+
     @classmethod
     def max_faults(cls, n: int) -> int:
         return (n - 1) // 4
@@ -39,6 +43,14 @@ class Queen(Protocol):
             return StepInfo(rnd, "vote", None)
         return StepInfo(rnd, "queen", self.order[rnd])
 
+    def _flag_missing(self, pid, inbox, who, valid):
+        """Lemma 8 part 1: a process that should have sent and sent nothing, or
+        something malformed, is faulty. (All honest processes run every round.)"""
+        for j in who:
+            m = inbox.get(j)
+            if not (type(m) in (int, str) and m in valid):
+                self.detected.setdefault(pid, set()).add(j)
+
     def process(self, pid: int, value, rounds=None):
         n = self.n
         speaks = self.w[pid] > 0
@@ -47,6 +59,7 @@ class Queen(Protocol):
             queen = self.order[q]
             # Phase 1: exchange preferences.
             inbox = yield (broadcast(n, V) if speaks else {})
+            self._flag_missing(pid, inbox, self.senders, (0, 1))
             s1 = self.weight_of(inbox, 1)
             s0 = self.W - s1  # missing or malformed messages count as 0
             if self.gt(s1, HALF):
@@ -57,8 +70,14 @@ class Queen(Protocol):
             # Phase 2: the queen broadcasts her majority value.
             inbox = yield (broadcast(n, myvalue) if pid == queen else {})
             queenvalue = inbox.get(queen)
+            self._flag_missing(pid, inbox, [queen] if self.w[queen] > 0 else [], (0, 1))
             if queenvalue not in (0, 1):
                 queenvalue = 0  # default when the queen is silent or garbled
 
-            V = myvalue if self.gt(myweight, HALF + self.rho) else queenvalue
+            strong = self.gt(myweight, HALF + self.rho)
+            if strong and queenvalue != myvalue:
+                # Garg & Bridgman Lemma 8: an honest queen would have sent myvalue,
+                # so this queen is certainly faulty. Feeds the weight update (Fig. 3).
+                self.detected.setdefault(pid, set()).add(queen)
+            V = myvalue if strong else queenvalue
         return V

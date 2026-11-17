@@ -24,6 +24,10 @@ class King(Protocol):
     name = "king"
     VALUES = (0, 1, UNDECIDED)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.detected: dict = {}  # honest pid -> kings it proved faulty
+
     @classmethod
     def max_faults(cls, n: int) -> int:
         return (n - 1) // 3
@@ -38,6 +42,14 @@ class King(Protocol):
                 StepInfo(rnd, "propose", None),
                 StepInfo(rnd, "king", self.order[rnd])][phase]
 
+    def _flag_missing(self, pid, inbox, who, valid):
+        """Garg & Bridgman Lemma 8 part 1: a process that should have sent and sent
+        nothing, or something malformed, is faulty."""
+        for j in who:
+            m = inbox.get(j)
+            if not (type(m) in (int, str) and m in valid):
+                self.detected.setdefault(pid, set()).add(j)
+
     def process(self, pid: int, value, rounds=None):
         n, rho = self.n, self.rho
         speaks = self.w[pid] > 0
@@ -46,6 +58,7 @@ class King(Protocol):
             king = self.order[k]
             # Phase 1: exchange preferences; adopt a value only with 1-rho support.
             inbox = yield (broadcast(n, V) if speaks else {})
+            self._flag_missing(pid, inbox, self.senders, (0, 1))
             s0, s1 = self.weight_of(inbox, 0), self.weight_of(inbox, 1)
             if self.ge(s0, 1 - rho):
                 V = 0
@@ -56,6 +69,7 @@ class King(Protocol):
 
             # Phase 2: exchange the (possibly undecided) preference.
             inbox = yield (broadcast(n, V) if speaks else {})
+            self._flag_missing(pid, inbox, self.senders, (0, 1, UNDECIDED))
             s0, s1 = self.weight_of(inbox, 0), self.weight_of(inbox, 1)
             su = self.W - s0 - s1  # undecided, missing and malformed
             myweight = 0
@@ -70,6 +84,11 @@ class King(Protocol):
             # Phase 3: the king breaks ties for processes without strong support.
             inbox = yield (broadcast(n, V) if pid == king else {})
             kingvalue = inbox.get(king)
+            self._flag_missing(pid, inbox, [king] if self.w[king] > 0 else [], (0, 1, UNDECIDED))
+            if V != UNDECIDED and self.ge(myweight, 1 - rho) and kingvalue != V:
+                # Analogue of Garg & Bridgman Lemma 8: honest phase-2 senders of V
+                # weigh >= 1 - 2rho > rho, so an honest king holds V. This king lied.
+                self.detected.setdefault(pid, set()).add(king)
             if V == UNDECIDED or not self.ge(myweight, 1 - rho):
                 V = kingvalue if kingvalue in (0, 1) else 1
         return V

@@ -692,6 +692,174 @@ def cmd_fig5(args):
             .round(1).to_string())
 
 
+SLIDE_RC = {"font.size": 15, "axes.spines.top": False, "axes.spines.right": False,
+            "axes.grid": True, "grid.color": "#e6e6e6", "grid.linewidth": 0.8,
+            "axes.edgecolor": "#888888", "axes.labelcolor": "#333333", "xtick.color": "#555555",
+            "ytick.color": "#555555", "legend.frameon": False}
+INK, GRAY, NAVY = "#222222", "#8c8c8c", "#1f4e79"
+
+
+def cmd_weightupdate(args):
+    """Appendix: repeated consensus where processes fail over time; weight updates."""
+    import multiprocessing as mp
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from byzantine.improvements import int_weights
+    from byzantine.weight_update import BOUND, survival_exact, trial
+
+    w = int_weights(args.na, args.nb, (3, 1))  # inverse failure probability, 1/0.1 : 1/0.3
+    ADVS = [("silent", "Silent faults"),
+            ("equivocate", "Equivocators: different values to different processes"),
+            ("split", "Adaptive split-vote attack"),
+            ("flip", "Consistent liars: same wrong value to everyone")]
+    METHODS = ("garg_queen", "garg_king", "gc_bad")
+    csv = os.path.join(RESULTS, "weight_update.csv")
+    if args.plot_only and os.path.exists(csv):
+        df = pd.read_csv(csv)
+    else:
+        jobs = [(m, adv, args.na, args.nb, args.qa, args.qb, w, args.ell, s)
+                for m in METHODS for adv, _ in ADVS for s in range(args.trials)]
+        jobs.sort(key=lambda j: j[0] != "gc_bad")  # slow ones first
+        t0 = time.time()
+        rows = []
+        with mp.Pool(args.jobs) as pool:
+            for i, r in enumerate(pool.imap_unordered(trial, jobs, chunksize=1), 1):
+                rows.extend(r)
+                if i % 200 == 0 or i == len(jobs):
+                    print(f"  {i}/{len(jobs)} trials, {time.time() - t0:.0f}s", flush=True)
+        df = pd.DataFrame(rows)
+        df.to_csv(csv, index=False)
+    sim = df[df.correct.notna()]
+    print(f"simulated instances: {len(sim)}, all correct: {bool(sim.correct.astype(bool).all())}")
+
+    ks = list(range(1, args.ell + 1))
+    exact = {m: survival_exact(args.na, args.nb, args.qa, args.qb, w, BOUND[m], args.ell)
+             for m in ("none_queen", "none_king")}
+
+    def surv(g, ntr):
+        lost = g[~g.alive.astype(bool)].groupby("seed").instance.min()
+        return [1 - (lost <= k).sum() / ntr for k in ks]
+
+    plt.rcParams.update(SLIDE_RC)
+    style = {"none_queen": dict(color=GRAY, ls=":", lw=2.4, label="Queen, no update"),
+             "none_king": dict(color=GRAY, ls="--", lw=2.4, label="King or Gradecast, no update"),
+             "garg_queen": dict(color=INK, ls=":", lw=2.4, label="Queen + Garg update"),
+             "garg_king": dict(color=INK, ls="-", lw=2.4, label="King + Garg-style update"),
+             "gc_bad": dict(color=NAVY, ls="-", lw=3, label="Gradecast + BAD-set update (ours)")}
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9.4), sharex=True, sharey=True)
+    summary = []
+    for ax, (adv, title) in zip(axes.flat, ADVS):
+        for m in ("none_queen", "none_king"):
+            ax.plot(ks, exact[m], **style[m])
+        for m in METHODS:
+            g = df[(df.method == m) & (df.adversary == adv)]
+            s = surv(g, args.trials)
+            ax.plot(ks, s, **style[m])
+            lost = g[~g.alive.astype(bool)].groupby("seed").instance.min()
+            summary.append(dict(adversary=adv, method=m, survive_end=s[-1],
+                                median_lost=(lost.median() if len(lost) > args.trials / 2 else None),
+                                removed=g.groupby("seed").removed.max().mean()))
+        ax.set_title(title, loc="left", fontsize=13.5, color=INK)
+        ax.set_xlim(1, args.ell)
+        ax.set_ylim(0, 1.05)
+    for ax in axes[1]:
+        ax.set_xlabel("Consensus instance")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("P(guarantee still holds)")
+    h, l = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=3, fontsize=12.5, bbox_to_anchor=(0.5, 0.0))
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
+    os.makedirs(os.path.join(RESULTS, "figures", "slides"), exist_ok=True)
+    out = os.path.join(RESULTS, "figures", "slides", "weight_update_survival.png")
+    fig.savefig(out, dpi=200)
+    print(out)
+    for m in ("none_queen", "none_king"):
+        print(m, "survive at end", round(exact[m][-1], 3),
+              "median lost-at", next((k for k, p in zip(ks, exact[m]) if p < 0.5), None))
+    print(pd.DataFrame(summary).round(3).to_string())
+    print(sim.groupby(["method", "adversary"]).steps.mean().round(1).to_string())
+
+
+def cmd_idealratio(args):
+    """Appendix: the ideal weight ratio, exact and by the closed-form approximation."""
+    from fractions import Fraction
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from byzantine.weight_assignment import SCHEMES, optimal_ratio, p_unsafe_ratio
+
+    fa, fb, na = float(args.fa), float(args.fb), args.na
+    tau = Fraction(1, 3)
+
+    def formula(p, t=float(tau)):
+        return max(0.0, (t - p) / (p * (1 - p)))
+
+    r_star = formula(fa) / formula(fb)
+    print(f"formula ratio wA/wB for tau = 1/3: {r_star:.2f}; "
+          f"for tau = 1/4: B weight = {formula(fb, 0.25):.3f} (only A)")
+    as_pair = lambda r: (Fraction(r).limit_denominator(1000).numerator, Fraction(r).limit_denominator(1000).denominator)
+    paper = {s: SCHEMES[s](Fraction(args.fa), Fraction(args.fb)) for s in SCHEMES}
+
+    plt.rcParams.update(SLIDE_RC)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.2))
+    # (a) P(lost) vs ratio at one |B|
+    nb = args.nb
+    rs = np.logspace(-1, 3, 600)
+    probs = p_unsafe_ratio(na, nb, fa, fb, [as_pair(r) for r in rs], tau)
+    ax = axes[0]
+    ax.plot(rs, probs, color=INK, lw=2)
+    ax.axhline(p_unsafe_ratio(na, nb, fa, fb, [(1, 0)], tau)[0], color=GRAY, ls="--", lw=1.8)
+    ax.text(1.2e2, p_unsafe_ratio(na, nb, fa, fb, [(1, 0)], tau)[0] + 0.004, "only A", color=GRAY, fontsize=12)
+    marks = [("uniform", 1.0), ("inverse", float(paper["inverse_failure"][0] / paper["inverse_failure"][1])),
+             ("formula", r_star)]
+    for name, r in marks:
+        p = p_unsafe_ratio(na, nb, fa, fb, [as_pair(r)], tau)[0]
+        ax.plot([r], [p], "o", ms=9, color=NAVY if name == "formula" else INK,
+                mfc="white" if name != "formula" else NAVY, mew=2)
+        ax.annotate(f"{name}\n{r:.1f} : 1", (r, p), textcoords="offset points", xytext=(-85, -45) if name == "inverse" else (6, 10), fontsize=12)
+    ropt, popt = optimal_ratio(na, nb, fa, fb, tau)
+    print(f"|B| = {nb}: exact optimum P = {popt:.4f} at r = {float(ropt) if ropt else 'only A'}; "
+          f"formula P = {p_unsafe_ratio(na, nb, fa, fb, [as_pair(r_star)], tau)[0]:.4f}")
+    ax.set_xscale("log")
+    ax.set_xlabel("Weight ratio  w_A / w_B")
+    ax.set_ylabel("P(faulty weight ≥ 1/3)")
+    ax.set_title(f"|B| = {nb}", loc="left", fontsize=14, color=INK)
+    ax.set_ylim(0, None)
+    # (b) P(lost) vs |B|: paper's best, formula, exact optimum
+    nbs = [x for x in range(0, args.nb_max + 1) if (na + x) % 3 == 0]
+    inv, form, opt, onlya = [], [], [], []
+    for x in nbs:
+        pr = p_unsafe_ratio(na, x, fa, fb, [as_pair(3.0), as_pair(r_star), (1, 0)], tau)
+        inv.append(pr[0]); form.append(pr[1]); onlya.append(pr[2])
+        opt.append(optimal_ratio(na, x, fa, fb, tau)[1])
+    ax = axes[1]
+    ax.plot(nbs, onlya, color=GRAY, ls="--", lw=1.8, label="Only A")
+    ax.plot(nbs, inv, color=INK, ls=":", lw=2.4, label="Inverse (paper's best)")
+    ax.plot(nbs, form, color=NAVY, lw=2.6, label=f"Formula ({r_star:.1f} : 1)")
+    ax.plot(nbs, opt, color=INK, lw=1.4, label="Exact optimum")
+    ax.set_xlabel("Number of processes in set B")
+    ax.set_title("Probability the guarantee is lost", loc="left", fontsize=14, color=INK)
+    ax.set_xlim(0, args.nb_max)
+    ax.set_ylim(0, None)
+    ax.legend(loc="lower left", fontsize=12)
+    fig.tight_layout()
+    out = os.path.join(RESULTS, "figures", "slides", "ideal_ratio.png")
+    fig.savefig(out, dpi=200)
+    pd.DataFrame(dict(nb=nbs, only_a=onlya, inverse=inv, formula=form, exact_opt=opt)).to_csv(
+        os.path.join(RESULTS, "ideal_ratio.csv"), index=False)
+    print(out)
+    for x in (30, 60, 90, 201, 399):
+        if x in nbs:
+            i = nbs.index(x)
+            print(x, "inverse", round(inv[i], 4), "formula", round(form[i], 4), "exact", round(opt[i], 4))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -726,6 +894,23 @@ def main():
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     p.add_argument("--plot-only", action="store_true", help="reuse results/fig4_compare_sim.csv")
     p.set_defaults(fn=cmd_fig4compare)
+    p = sub.add_parser("weightupdate")
+    p.add_argument("--na", type=int, default=6)
+    p.add_argument("--nb", type=int, default=30)
+    p.add_argument("--qa", type=float, default=0.005, help="per-instance failure probability, A")
+    p.add_argument("--qb", type=float, default=0.015, help="per-instance failure probability, B")
+    p.add_argument("--ell", type=int, default=100)
+    p.add_argument("--trials", type=int, default=200)
+    p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    p.add_argument("--plot-only", action="store_true")
+    p.set_defaults(fn=cmd_weightupdate)
+    p = sub.add_parser("idealratio")
+    p.add_argument("--na", type=int, default=6)
+    p.add_argument("--nb", type=int, default=60)
+    p.add_argument("--fa", default="0.1")
+    p.add_argument("--fb", default="0.3")
+    p.add_argument("--nb-max", type=int, default=400)
+    p.set_defaults(fn=cmd_idealratio)
     p = sub.add_parser("fig5")
     p.add_argument("--na", type=int, default=6)
     p.add_argument("--fa", default="0.1")

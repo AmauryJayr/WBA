@@ -1,0 +1,42 @@
+  200/2400 trials, 184s
+  400/2400 trials, 361s
+  600/2400 trials, 555s
+  800/2400 trials, 685s
+  1000/2400 trials, 692s
+  1200/2400 trials, 695s
+  1400/2400 trials, 697s
+  1600/2400 trials, 700s
+  1800/2400 trials, 712s
+  2000/2400 trials, 723s
+  2200/2400 trials, 734s
+  2400/2400 trials, 744s
+simulated instances: 143252, all correct: True
+results\figures\slides\weight_update_survival.png
+none_queen survive at end 0.0 median lost-at 26
+none_king survive at end 0.0 median lost-at 37
+     adversary      method  survive_end  median_lost  removed
+0       silent  garg_queen         0.98          NaN   25.420
+1       silent   garg_king         1.00          NaN   25.500
+2       silent      gc_bad         1.00          NaN   25.500
+3   equivocate  garg_queen         0.00         28.0    0.280
+4   equivocate   garg_king         0.00         41.0    0.750
+5   equivocate      gc_bad         0.22         69.5   13.360
+6        split  garg_queen         0.00         28.0    0.280
+7        split   garg_king         0.00         41.0    0.765
+8        split      gc_bad         1.00          NaN   25.480
+9         flip  garg_queen         0.00         28.0    0.255
+10        flip   garg_king         0.00         37.0    0.160
+11        flip      gc_bad         0.00         37.0    0.000
+method      adversary 
+garg_king   equivocate    17.2
+            flip          17.8
+            silent        11.3
+            split         17.2
+garg_queen  equivocate     8.0
+            flip           8.0
+            silent         5.8
+            split          8.0
+gc_bad      equivocate     8.7
+            flip           8.9
+            silent         8.4
+            split          8.4
