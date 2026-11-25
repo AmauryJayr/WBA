@@ -1,0 +1,7 @@
+alpha_rho = 2, cap_rho = 11
+king      silent   correct=True rounds=2
+king      split    correct=True rounds=2
+king      stagger  correct=True rounds=2
+gradecast silent   correct=True rounds=3
+gradecast split    correct=True rounds=3
+gradecast stagger  correct=True rounds=2

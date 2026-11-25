@@ -238,7 +238,9 @@ results of its own extra iteration, so the processes that have already left do
 not matter.
 
 **Proposition 7.6 [ours].** For ρ < 1/3, weighted Gradecast consensus solves
-weighted BA, with at most cap_ρ + 1 iterations of 3 steps.
+weighted BA, with at most cap_ρ iterations of 3 steps. (A process that sees the
+exit condition in iteration cap_ρ returns at once: the loop never starts iteration
+cap_ρ + 1, matching `gradecast.py`.)
 *Proof.* Let F be the number of positive-weight faulty processes. Each disputed
 iteration uses up a distinct one of them (Claim 7.4), so among any F + 1
 iterations one is undisputed, and all honest processes agree after it (Claim 7.3)
@@ -248,7 +250,7 @@ So agreement holds before the loop's cap. Exits are safe by Claim 7.5, and
 validity is Claim 7.2. ∎
 
 **Corollary 7.7 (early stopping) [ours].** With F actual positive-weight faulty
-processes, every honest process stops after at most min(F + 3, cap_ρ + 1)
+processes, every honest process stops after at most min(F + 3, cap_ρ)
 iterations: at most F + 1 to reach an undisputed iteration, 1 more to see the exit
 condition, and 1 extra iteration to carry the others along.
 

@@ -1,0 +1,32 @@
+python run_experiments.py sweep --protocols queen king gradecast --n 4 7 10 13 16 25 31 49 --adversaries silent crash random flip equivocate split stagger --trials 2
+26208 trials in 2350.9s -> results/sweep_paper.csv
+                                   trials  agreement  validity  correct
+protocol  within_bound adversary                                       
+gradecast True         crash         1368      1.000     1.000    1.000
+                       equivocate    1368      1.000     1.000    1.000
+                       flip          1368      1.000     1.000    1.000
+                       random        1368      1.000     1.000    1.000
+                       silent        1368      1.000     1.000    1.000
+                       split         1368      1.000     1.000    1.000
+                       stagger       1368      1.000     1.000    1.000
+king      True         crash         1368      1.000     1.000    1.000
+                       equivocate    1368      1.000     1.000    1.000
+                       flip          1368      1.000     1.000    1.000
+                       random        1368      1.000     1.000    1.000
+                       silent        1368      1.000     1.000    1.000
+                       split         1368      1.000     1.000    1.000
+                       stagger       1368      1.000     1.000    1.000
+queen     True         crash         1008      1.000     1.000    1.000
+                       equivocate    1008      1.000     1.000    1.000
+                       flip          1008      1.000     1.000    1.000
+                       random        1008      1.000     1.000    1.000
+                       silent        1008      1.000     1.000    1.000
+                       split         1008      1.000     1.000    1.000
+                       stagger       1008      1.000     1.000    1.000
+
+python -m unittest discover -s tests
+................
+----------------------------------------------------------------------
+Ran 16 tests in 2068.438s
+
+OK

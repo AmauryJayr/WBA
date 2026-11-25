@@ -1,0 +1,18 @@
+setup: |A|=6, |B|=30, weights 3:1 (inverse failure), per-instance failure probability qA=0.005, qB=0.015, 100 instances, 200 trials per cell
+simulated instances: 143252, all correct: True
+wall time: 2240s
+none_queen (exact)  survive_end=0.000  median_lost_at=26
+none_king  (exact)  survive_end=0.000  median_lost_at=37
+adversary   method      survive_end  median_lost_at  mean_removed  mean_steps
+silent      garg_queen        0.980  None                   25.42         5.8
+silent      garg_king         1.000  None                   25.50        11.3
+silent      gc_bad            1.000  None                   25.50         8.4
+equivocate  garg_queen        0.000  28.0                    0.28         8.0
+equivocate  garg_king         0.000  41.0                    0.75        17.2
+equivocate  gc_bad            0.220  69.5                   13.36         8.7
+split       garg_queen        0.000  28.0                    0.28         8.0
+split       garg_king         0.000  41.0                    0.77        17.2
+split       gc_bad            1.000  None                   25.48         8.4
+flip        garg_queen        0.000  28.0                    0.26         8.0
+flip        garg_king         0.000  37.0                    0.16        17.8
+flip        gc_bad            0.000  37.0                    0.00         8.9
