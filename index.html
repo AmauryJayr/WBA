@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weighted Byzantine Agreement on Gradecast</title>
+<meta name="description" content="A weighted version of Ben-Or, Dolev and Hoch's Gradecast-based consensus, compared with Garg and Bridgman's weighted King. EE 382N term project, UT Austin, Fall 2026.">
+<style>
+:root{
+  --bg:#fbfaf7; --surface:#ffffff; --ink:#1d1f23; --muted:#5d636d; --line:#e3e0d8;
+  --accent:#9a3412; --accent-soft:#fdeee4; --king:#2f5d8a; --king-soft:#dce8f4; --wgc:#b4532a; --wgc-soft:#f7e1d5;
+  --rho:#1d1f23; --code-bg:#f3f1ec;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171a; --surface:#1d2024; --ink:#e8e6e1; --muted:#a2a7ae; --line:#30343a;
+    --accent:#f0a47a; --accent-soft:#3a2519; --king:#8fb8e0; --king-soft:#22303d; --wgc:#f0a47a; --wgc-soft:#3a2519;
+    --rho:#e8e6e1; --code-bg:#23262b;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171a; --surface:#1d2024; --ink:#e8e6e1; --muted:#a2a7ae; --line:#30343a;
+  --accent:#f0a47a; --accent-soft:#3a2519; --king:#8fb8e0; --king-soft:#22303d; --wgc:#f0a47a; --wgc-soft:#3a2519;
+  --rho:#e8e6e1; --code-bg:#23262b;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Charter,Georgia,serif}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+a{color:var(--accent)}
+header{padding:72px 0 40px;border-bottom:1px solid var(--line)}
+.kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+h1{font-size:clamp(32px,6vw,50px);line-height:1.1;margin:0 0 18px;font-weight:600;letter-spacing:-.01em}
+.authors{font-size:18px;margin:0}
+.affil{color:var(--muted);margin:4px 0 26px}
+.buttons{display:flex;flex-wrap:wrap;gap:10px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);text-decoration:none;font-weight:550;font-size:15px}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn svg{width:16px;height:16px}
+section{padding:48px 0;border-bottom:1px solid var(--line)}
+h2{font-size:27px;line-height:1.25;margin:0 0 16px;font-weight:600}
+h3{font-size:18px;margin:28px 0 8px}
+p{margin:0 0 14px}
+.lead{font-size:19px}
+.muted{color:var(--muted)}
+.tldr{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:18px 20px;margin:0}
+.tldr p:last-child{margin:0}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:22px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.stat .num{font-size:30px;font-weight:650;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .num small{font-size:16px;font-weight:500;color:var(--muted)}
+.stat .what{font-size:15px;color:var(--muted);margin-top:6px;line-height:1.45}
+figure{margin:26px 0 0}
+.fig{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:hidden}
+.fig img{display:block;width:100%;height:auto}
+figcaption{font-size:14.5px;color:var(--muted);margin-top:10px;line-height:1.5}
+figcaption b{color:var(--ink)}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.diagram svg{display:block;width:100%;height:auto}
+.diagram .heavy{fill:var(--line)}
+.diagram text{fill:var(--ink);font:13px system-ui,sans-serif}
+.diagram .lbl{fill:var(--muted);font-size:12px}
+.diagram .k{fill:var(--king)}
+.diagram .g{fill:var(--wgc)}
+.diagram .rho{stroke:var(--rho);stroke-width:2;stroke-dasharray:4 3}
+.diagram .seg{stroke:var(--surface);stroke-width:1.5}
+.diagram .off{fill:var(--line)}
+table{border-collapse:collapse;width:100%;font-size:15px;margin-top:8px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{font-weight:600;border-bottom:2px solid var(--line)}
+tbody th{font-weight:500;color:var(--muted)}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px 8px}
+.formula{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:21px;text-align:center;margin:18px 0;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+.frac{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;line-height:1.25}
+.frac>span:first-child{border-bottom:1.5px solid currentColor;padding:0 4px}
+.frac>span:last-child{padding:0 4px}
+i.v{font-style:italic}
+ol.contrib{padding-left:22px;margin:0}
+ol.contrib li{margin-bottom:10px}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:10px 0 0}
+code{font:0.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre code{background:none;padding:0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:700px){.two,.stats{grid-template-columns:1fr} header{padding-top:48px} section{padding:38px 0}}
+footer{padding:32px 0 56px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">EE 382N Distributed Systems · The University of Texas at Austin · Fall 2026</p>
+    <h1 class="serif">Weighted Byzantine Agreement on Gradecast</h1>
+    <p class="authors">Amaury Jayr and Nathan Lemma</p>
+    <p class="affil">Term project</p>
+    <div class="buttons">
+      <a class="btn primary" href="paper.pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Paper (PDF)</a>
+      <a class="btn" href="https://github.com/AmauryJayr/WBA/tree/paper-draft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>Code</a>
+      <a class="btn" href="#reproduce">Reproduce the figures</a>
+    </div>
+  </div>
+</header>
+
+<main>
+<section>
+  <div class="wrap">
+    <h2 class="serif">In short</h2>
+    <div class="tldr">
+      <p class="lead">In weighted Byzantine agreement, every process has a weight. Agreement only needs the faulty processes to hold at most a fraction ρ of the total weight, so many processes can fail as long as they are light.</p>
+      <p>Garg and Bridgman built weighted versions of the Queen and King algorithms. We built a weighted version of Ben-Or, Dolev and Hoch's Gradecast-based consensus, which we call WGC, by turning every count threshold into a weight threshold. We argue that WGC works for ρ &lt; 1/3, like weighted King, and that it stops early: within min(<i class="v">F</i>+3, cap<sub>ρ</sub>) iterations, where <i class="v">F</i> is how many processes with positive weight actually fail. We then compare WGC and King on Garg and Bridgman's own setup.</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num">122 <small>vs 135</small></div><div class="what">Expected rounds for WGC vs King with uniform weights and 405 processes. Early stopping saves about 10%.</div></div>
+      <div class="stat"><div class="num">9 <small>vs 127</small></div><div class="what">Rounds when faults are rare: WGC's expected bound vs King's fixed count (inverse-failure weights, |B| = 399).</div></div>
+      <div class="stat"><div class="num">0.019 <small>vs 0.037</small></div><div class="what">Chance of losing the guarantee with our weight formula vs inverse-failure weights at |B| = 399.</div></div>
+      <div class="stat"><div class="num">9–45×</div><div class="what">How many more bits WGC sends than King at <i class="v">N</i> = 49. Early stopping saves time, not bandwidth.</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="serif">The catch: heaviest vs. lightest</h2>
+    <p>Weighted King rotates a king through the heaviest processes. It runs α<sub>ρ</sub> rounds: the number of heaviest processes it takes to go over weight ρ, so that one of them must be honest. WGC can stop early, but in the worst case the adversary fails as many processes as it can fit under ρ, so it picks the lightest ones. WGC's worst case, cap<sub>ρ</sub>, is one more than the number of lightest processes that fit under ρ. It is never smaller than α<sub>ρ</sub>, and with uneven weights it can be much bigger.</p>
+    <figure>
+      <div class="diagram" role="img" aria-label="Thirteen processes on a strip of total weight 1: three weigh 0.25 and ten weigh 0.025. With rho = 0.3, the two heaviest already pass rho, so King needs 2 rounds. All ten light processes fit under rho, so WGC's worst case is 11 iterations.">
+        <svg viewBox="0 0 640 214" xmlns="http://www.w3.org/2000/svg">
+          <text x="20" y="20">King: count the <tspan font-weight="600">heaviest</tspan> until their weight passes ρ</text>
+          <g transform="translate(0,30)">
+            <rect class="k seg" x="20" y="0" width="150" height="34"/>
+            <rect class="k seg" x="170" y="0" width="150" height="34"/>
+            <rect class="off seg" x="320" y="0" width="150" height="34"/>
+            <g class="off">
+              <rect class="off seg" x="470" y="0" width="15" height="34"/><rect class="off seg" x="485" y="0" width="15" height="34"/><rect class="off seg" x="500" y="0" width="15" height="34"/><rect class="off seg" x="515" y="0" width="15" height="34"/><rect class="off seg" x="530" y="0" width="15" height="34"/><rect class="off seg" x="545" y="0" width="15" height="34"/><rect class="off seg" x="560" y="0" width="15" height="34"/><rect class="off seg" x="575" y="0" width="15" height="34"/><rect class="off seg" x="590" y="0" width="15" height="34"/><rect class="off seg" x="605" y="0" width="15" height="34"/>
+            </g>
+            <line class="rho" x1="200" y1="-6" x2="200" y2="40"/>
+            <text class="lbl" x="20" y="54">α<tspan baseline-shift="sub" font-size="10">ρ</tspan> = 2 rounds</text>
+          </g>
+          <text x="20" y="122">WGC: count the <tspan font-weight="600">lightest</tspan> that still fit under ρ</text>
+          <g transform="translate(0,132)">
+            <rect class="g seg" x="20" y="0" width="15" height="34"/><rect class="g seg" x="35" y="0" width="15" height="34"/><rect class="g seg" x="50" y="0" width="15" height="34"/><rect class="g seg" x="65" y="0" width="15" height="34"/><rect class="g seg" x="80" y="0" width="15" height="34"/><rect class="g seg" x="95" y="0" width="15" height="34"/><rect class="g seg" x="110" y="0" width="15" height="34"/><rect class="g seg" x="125" y="0" width="15" height="34"/><rect class="g seg" x="140" y="0" width="15" height="34"/><rect class="g seg" x="155" y="0" width="15" height="34"/>
+            <rect class="off seg" x="170" y="0" width="150" height="34"/>
+            <rect class="off seg" x="320" y="0" width="150" height="34"/>
+            <rect class="off seg" x="470" y="0" width="150" height="34"/>
+            <line class="rho" x1="200" y1="-6" x2="200" y2="40"/>
+            <text class="lbl" x="20" y="54">cap<tspan baseline-shift="sub" font-size="10">ρ</tspan> = 1 + 10 = 11 iterations</text>
+          </g>
+          <text x="208" y="84" class="lbl">ρ = 0.3</text>
+        </svg>
+      </div>
+      <figcaption>The example from Section III: three trusted processes weigh 0.25 each, ten light ones weigh 0.025 each, and ρ = 0.3. King always takes 2 rounds. WGC's bound allows 11 iterations, but in our simulator it finished in 2 or 3, because the ten faulty processes together weigh no more than one trusted process and so can swing the vote only once.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="serif">What we did</h2>
+    <ol class="contrib">
+      <li><b>Weighted Gradecast and WGC.</b> We wrote both algorithms and a proof sketch that WGC satisfies agreement, validity and termination for ρ &lt; 1/3, and stops within min(<i class="v">F</i>+3, cap<sub>ρ</sub>) iterations.</li>
+      <li><b>An exact simulator.</b> A Python package of about 2,400 lines that runs weighted Queen, King and WGC against seven adversaries, including attacks built to force the worst case. It checks every weight threshold with fractions instead of floating point. A sweep of 26,208 runs found no violations.</li>
+      <li><b>An evaluation on Garg and Bridgman's two-group setup.</b> Six reliable processes (A, fail with probability 0.1) and 0 to 399 less reliable ones (B, fail with probability 0.3). We measured how often the weight bound breaks, how many rounds each algorithm needs, how many bits it sends, and how well each one drops faulty processes when weights are updated over time.</li>
+    </ol>
+
+    <h3>The three algorithms</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>Weighted Queen</th><th>Weighted King</th><th>WGC (ours)</th></tr></thead>
+        <tbody>
+          <tr><th>Faulty weight tolerated</th><td>ρ &lt; 1/4</td><td>ρ &lt; 1/3</td><td>ρ &lt; 1/3</td></tr>
+          <tr><th>Steps per round</th><td>2</td><td>3</td><td>3</td></tr>
+          <tr><th>Rounds</th><td>α<sub>ρ</sub></td><td>α<sub>ρ</sub></td><td>≤ min(<i class="v">F</i>+3, cap<sub>ρ</sub>)</td></tr>
+          <tr><th>Worst case set by</th><td>heaviest</td><td>heaviest</td><td>lightest</td></tr>
+          <tr><th>Leaders per round</th><td>1 queen</td><td>1 king</td><td>all <i class="v">p</i></td></tr>
+          <tr><th>Remembers faulty</th><td>no</td><td>no</td><td>yes (BAD sets)</td></tr>
+          <tr><th>Entries sent per round</th><td>≈ <i class="v">pN</i></td><td>≈ 2<i class="v">pN</i></td><td>≈ 2<i class="v">p</i><sup>2</sup><i class="v">N</i></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:10px;font-size:15px"><i class="v">p</i> = number of processes with positive weight; <i class="v">F</i> = how many of them actually fail.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="serif">Results</h2>
+
+    <h3>WGC vs. King: it depends on how often processes fail</h3>
+    <p>King's round count depends only on the weights. WGC's depends mostly on how many processes actually fail. With Garg and Bridgman's failure rates, about 30% of B fails, so WGC can't stop much earlier than King. With uniform weights it saves about 10%, and with inverse-failure weights its worst case is worse (139 vs. 127). When faults are rare (A fails with probability 0.005 and B with 0.015), WGC's expected bound drops to 9.0. Its 240 simulated runs under the stagger attack all reached agreement and averaged 9.1 rounds at |B| = 399. King still needs 127 rounds.</p>
+    <figure>
+      <div class="fig"><img src="figures/king_vs_gradecast.png" alt="Three panels of rounds versus the size of B. In (a) and (b), with Garg and Bridgman's failure rates, King's line and WGC's lines rise together to about 120 to 140 rounds. In (c), with rare faults, King rises to 127 while WGC stays below about 10." loading="lazy"></div>
+      <figcaption><b>Fig. 2.</b> Rounds to decide versus |B|. Lines are exact: King's α<sub>ρ</sub>, WGC's worst case cap<sub>ρ</sub>, and WGC's bound averaged over the failure model. Circles are simulated WGC runs against the stagger attack (mean, with bars from minimum to maximum, over 20 failure draws). (a) and (b) use Garg and Bridgman's failure rates; (c) uses rare faults.</figcaption>
+    </figure>
+    <p style="margin-top:18px">King can catch up when there is a small reliable group to put the weight on. At a 60:1 weight ratio between A and B, it needs 5 rounds and loses the guarantee with probability about 10<sup>−10</sup>. So WGC pays off when faults are rare and there is no small reliable group to lean on.</p>
+
+    <h3>Choosing weights</h3>
+    <p>Say process <i class="v">i</i> fails with probability <i class="v">p<sub>i</sub></i> and the algorithm tolerates faulty weight below τ. If we treat the faulty weight as roughly normal, the guarantee is safest when</p>
+    <div class="formula" aria-label="w sub i is proportional to the maximum of 0 and (tau minus p sub i) over p sub i times (1 minus p sub i)">
+      <span><i class="v">w<sub>i</sub></i> ∝ max</span><span>(&thinsp;0,&ensp;</span><span class="frac"><span>τ − <i class="v">p<sub>i</sub></i></span><span><i class="v">p<sub>i</sub></i>(1 − <i class="v">p<sub>i</sub></i>)</span></span><span>&thinsp;)</span>
+    </div>
+    <p>So any process that fails at least as often as the bound gets weight 0. For King and WGC (τ = 1/3) this gives A and B weights of about 16.3 : 1, much more lopsided than inverse-failure's 3 : 1. It halves the chance of losing the guarantee at |B| = 399 (0.019 vs. 0.037). For Queen (τ = 1/4) it gives B weight 0.</p>
+    <figure>
+      <div class="fig"><img src="figures/failure_probability.png" alt="Two panels of the probability that the guarantee is lost versus the size of B, one line per weighting. In (a), for King and WGC, the red formula line is at or below every other weighting. In (b), for Queen, every weighting that gives B weight approaches probability 1." loading="lazy"></div>
+      <figcaption><b>Fig. 1.</b> Probability that the faulty weight reaches the algorithm's bound, versus |B| (exact). (a) recreates Garg and Bridgman's Fig. 4 and applies to both weighted King and WGC. (b) is the same for weighted Queen's bound of 1/4. The red line is our weight formula.</figcaption>
+    </figure>
+
+    <div class="two">
+      <figure>
+        <div class="fig"><img src="figures/king_rounds.png" alt="King rounds versus the size of B for each weighting. Uniform rises to 135, inverse-failure to 127, the formula to 74, and only-A stays at 2." loading="lazy"></div>
+        <figcaption><b>Fig. 3.</b> Rounds α<sub>ρ</sub> that weighted King always runs (recreates Garg and Bridgman's Fig. 5). Our formula needs at most 8 rounds up to |B| = 201 and 74 at |B| = 399.</figcaption>
+      </figure>
+      <figure>
+        <div class="fig"><img src="figures/messages.png" alt="Bits sent by honest processes on a log scale versus N, for Queen, King and weighted Gradecast with and without an attack. WGC sends the most." loading="lazy"></div>
+        <figcaption><b>Fig. 4.</b> Bits sent by honest processes in one agreement instance, uniform weights, largest tolerated <i class="v">t</i>. At <i class="v">N</i> = 49, WGC decides in 3 iterations with no faults but sends 9.3× King's bits, and 45× under the stagger attack.</figcaption>
+      </figure>
+    </div>
+
+    <h3>Updating weights over time</h3>
+    <p>Garg and Bridgman also describe updating weights between agreement instances: a process caught misbehaving gets weight 0. WGC's blacklists (BAD sets) make a much better rule than theirs. Against split-vote attackers, WGC kept the guarantee for all 100 instances in every run. Against equivocators it pushed the median loss from instance 37 to 69.5. Processes that tell everyone the same wrong value are invisible to every scheme, since they look like honest processes with a different input.</p>
+    <figure>
+      <div class="fig"><img src="figures/weight_update.png" alt="Four panels of the share of runs whose guarantee still holds versus the agreement instance, for silent, equivocate, split vote and same-wrong-value attackers. WGC with BAD-set updates stays highest against equivocate and split vote." loading="lazy"></div>
+      <figcaption><b>Fig. 5.</b> Weight updates when processes fail over time: the share of runs whose faulty weight is still below the bound at each agreement instance (6 A and 30 B processes, weights 3 : 1, 200 runs per line). Gray lines are exact and use no update.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="serif">Takeaway</h2>
+    <p class="lead">WGC is correct for the same ρ &lt; 1/3 as weighted King and stops early, but its worst case is set by the lightest processes and it sends far more traffic. It fits best when Byzantine faults are rare, there is no small reliable group for King to lean on, and latency matters more than bandwidth. Its blacklists also make a good rule for updating weights over time.</p>
+  </div>
+</section>
+
+<section id="reproduce">
+  <div class="wrap">
+    <h2 class="serif">Reproduce</h2>
+    <p>Every figure and every number in the paper comes from a script in <a href="https://github.com/AmauryJayr/WBA/tree/paper-draft/paper"><code>paper/</code></a>. Run them from the repository root:</p>
+<pre><code>git clone -b paper-draft https://github.com/AmauryJayr/WBA.git && cd WBA
+pip install numpy scipy pandas matplotlib
+python -m unittest discover -s tests -v          # correctness tests
+
+# Figures from the simulation data already in the repo
+python paper/scripts/make_figures.py             # Figs. 1-4 and paper/data/numbers.txt
+python paper/scripts/weight_update_fig.py        # Fig. 5
+
+# Re-run the simulations behind them
+python run_experiments.py fig4compare --sim-nb 0 6 12 18 30 42 60 90 120 --draws 20
+python paper/scripts/rare_sim.py                 # Fig. 2(c), ~21 min on 7 cores
+python paper/scripts/messages.py                 # Fig. 4, ~15 s
+python paper/scripts/weight_update.py            # Section V-F numbers, ~40 min on 8 cores</code></pre>
+    <p class="muted" style="margin-top:12px;font-size:15px">The <a href="https://github.com/AmauryJayr/WBA/blob/paper-draft/paper/README.md">paper README</a> lists every script and the data file each number comes from.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    Amaury Jayr and Nathan Lemma · EE 382N Distributed Systems, The University of Texas at Austin, Fall 2026 ·
+    <a href="paper.pdf">Paper (PDF)</a> · <a href="https://github.com/AmauryJayr/WBA">GitHub</a>
+  </div>
+</footer>
+</body>
+</html>
